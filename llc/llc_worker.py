@@ -73,6 +73,8 @@ class LLCModel:
             print ' upper left  (XC=% 6.2f, YC=% 6.2f)' % (xc[0,-1,0],yc[0,-1,0])
             print ' upper right (XC=% 6.2f, YC=% 6.2f)' % (xc[0,-1,-1],yc[0,-1,-1])
             
+    def get_tile_factory(self, **kwargs):
+        return LLCTileFactory(self, **kwargs)
 
 
 class LLCTileFactory:
@@ -98,13 +100,25 @@ class LLCTileFactory:
         self._idx_face = 0
         self._idx_x = 0
         self._idx_y = 0
+        self._ntile = 0
     
     def __iter__(self):
         return self
         
     def next(self):
-        if self._idx_x==self.tiledim[self._idx_face]:
-            pass
+        if self._idx_x==self.tiledim[self._idx_face][1]:
+            self._idx_x = 0
+            self._idx_y += 1
+        if self._idx_y==self.tiledim[self._idx_face][0]:
+            self._idx_y = 0
+            self._idx_face += 1
+        if self._idx_face==self.llc.Nfaces:
+            raise StopIteration
+        xlims = self.tileshape[1] * np.r_[self._idx_x,self._idx_x+1]
+        ylims = self.tileshape[0] * np.r_[self._idx_y,self._idx_y+1]
+        self._idx_x += 1
+        self._ntile += 1
+        return LLCTile(self.llc, self._idx_face, ylims, xlims)
     
     def get_tile(self, Ntile):
         Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
@@ -126,8 +140,12 @@ class LLCTile:
         if zrange is None:
             zrange = np.r_[:self.llc.Nz] 
         return self.llc.memmap_face(fname, self.Nface)[
-                zrange, ylims[0]:ylims[1], xlims[0]:xlims[1] ]
-        
+                zrange, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
+    
+    def print_mean_position():
+        xmean = self.load_data('XC.data', zrange=0).mean()
+        ymean = self.load_data('YC.data', zrange=0).mean()
+        print 'Tile mean position: ', (xmean, ymean)
         
         
         
