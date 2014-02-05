@@ -1,10 +1,10 @@
 import numpy as np
 import os
-
+        
 class LLCModel:
     """The parent object that describes a whole MITgcm Lat-Lon Cube setup."""
 
-    def __init__(self, Nfaces=5, Nside=12960, Ntop=4320, Nz=90,
+    def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
         data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4')):
 
         self.Nfaces = Nfaces
@@ -13,7 +13,15 @@ class LLCModel:
         self.Nz = Nz
         self.Nxtot = 4*Nside + Ntop # the total X dimension of the files
         self.dtype = default_dtype
-         
+        
+        # default to working directory
+        if data_dir is None:
+            data_dir = '.'
+        if grid_dir is None:
+            grid_dir = '.'
+        self.data_dir = data_dir
+        self.grid_dir = grid_dir   
+        
         # default grid layout within output files (I hope all LLC setups are like this)
         self.facedims=np.array([
             (Ntop, Nside), # first LL face
@@ -32,6 +40,14 @@ class LLCModel:
 
     def _facedim(self,Nface):
         return self.facedims[self.faceorder[Nface]]
+
+    def load_data_file(self, fname, *args):
+        return self.memmap_face(
+            os.path.join(self.data_dir, fname) *args)
+
+    def load_grid_file(self, fname, *args):
+        return self.memmap_face(
+            os.path.join(self.grid_dir, fname), *args)
 
     def memmap_face(self, fname, Nface):
         """Returns a memmap to the requested face"""
@@ -65,8 +81,8 @@ class LLCModel:
         
     def describe_faces(self):
         for n in range(self.Nfaces):
-            xc = self.memmap_face('XC.data',n)
-            yc = self.memmap_face('YC.data',n)
+            xc = self.load_grid_file('XC.data',n)
+            yc = self.load_grid_file('YC.data',n)
             print 'Face %g:' % n
             print ' lower left  (XC=% 6.2f, YC=% 6.2f)' % (xc[0,0,0],yc[0,0,0])
             print ' lower right (XC=% 6.2f, YC=% 6.2f)' % (xc[0,0,-1],yc[0,0,-1])
@@ -76,6 +92,21 @@ class LLCModel:
     def get_tile_factory(self, **kwargs):
         return LLCTileFactory(self, **kwargs)
 
+
+# extend the basic class for the specific grids
+class LLCModel4320(LLCModel):
+    """A specific LLC grid."""
+    
+    def __init__(self, *args, **kwargs):
+        LLCModel.__init__(self,
+            Nfaces=5, Nside=12960, Ntop=4320, Nz=90,
+            *args, **kwargs)
+            
+class LLCModel1080(LLCModel):
+    def __init__(self, *args, **kwargs):
+        LLCModel.__init__(self,
+            Nfaces=5, Nside=3240, Ntop=1080, Nz=90,
+            *args, **kwargs)
 
 class LLCTileFactory:
     """Has generator for splitting domain into tiles."""
@@ -117,8 +148,9 @@ class LLCTileFactory:
         xlims = self.tileshape[1] * np.r_[self._idx_x,self._idx_x+1]
         ylims = self.tileshape[0] * np.r_[self._idx_y,self._idx_y+1]
         self._idx_x += 1
+        return LLCTile(self.llc, self._idx_face,
+                        ylims, xlims, self._ntile)
         self._ntile += 1
-        return LLCTile(self.llc, self._idx_face, ylims, xlims)
     
     def get_tile(self, Ntile):
         Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
@@ -128,25 +160,35 @@ class LLCTileFactory:
 class LLCTile:
     """This class describes a usable subregion of the LLC model"""
     
-    def __init__(self, llc_model_parent, Nface, ylims, xlims):
+    def __init__(self, llc_model_parent, Nface, ylims, xlims, tile_id):
         self.llc = llc_model_parent
         self.Nface = Nface
         self.ylims = ylims
         self.xlims = xlims
         self.Nx = xlims[1] - xlims[0]
         self.Ny = ylims[1] - ylims[0]
-        
-    def load_data(self, fname, zrange=None):
+        self.id = tile_id
+        self.shape = (self.llc.Nz, self.Ny, self.Nx)
+    
+    def load_grid(self, fname, **kwargs):
+        return self.load_data(fname, grid=True, **kwargs)
+    
+    def load_data(self, fname, zrange=None, grid=False):
         if zrange is None:
-            zrange = np.r_[:self.llc.Nz] 
-        return self.llc.memmap_face(fname, self.Nface)[
+            zrange = np.r_[:self.llc.Nz]
+        if grid:
+            loadfunc = self.llc.load_grid_file
+        else:
+            loadfunc = self.llc.load_data_file    
+        return loadfunc(fname, self.Nface)[
                 zrange, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
     
-    def print_mean_position():
-        xmean = self.load_data('XC.data', zrange=0).mean()
-        ymean = self.load_data('YC.data', zrange=0).mean()
-        print 'Tile mean position: ', (xmean, ymean)
+    def get_mean_position(self):
+        xmean = self.load_grid('XC.data', zrange=0).mean()
+        ymean = self.load_grid('YC.data', zrange=0).mean()
+        return (ymean,xmean)
         
+    
         
         
         
