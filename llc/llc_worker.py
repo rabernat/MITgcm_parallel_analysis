@@ -1,6 +1,6 @@
 import numpy as np
 import os
-        
+
 class LLCModel:
     """The parent object that describes a whole MITgcm Lat-Lon Cube setup."""
 
@@ -91,8 +91,7 @@ class LLCModel:
             
     def get_tile_factory(self, **kwargs):
         return LLCTileFactory(self, **kwargs)
-
-
+        
 # extend the basic class for the specific grids
 class LLCModel4320(LLCModel):
     """A specific LLC grid."""
@@ -148,15 +147,26 @@ class LLCTileFactory:
         xlims = self.tileshape[1] * np.r_[self._idx_x,self._idx_x+1]
         ylims = self.tileshape[0] * np.r_[self._idx_y,self._idx_y+1]
         self._idx_x += 1
-        return LLCTile(self.llc, self._idx_face,
-                        ylims, xlims, self._ntile)
         self._ntile += 1
+        return LLCTile(self.llc, self._idx_face,
+                        ylims, xlims, self._ntile-1)
     
     def get_tile(self, Ntile):
         Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
         # this is annoying
         
-            
+
+# a utility function
+def latlon_to_meters((lat,lon)):
+    """Converts given lat/lon in WGS84 Datum to XY in Spherical Mercator EPSG:900913"""
+    a = 6378137.
+    originShift = 2 * np.pi * a / 2.
+    mx = lon * originShift / 180.0
+    my = np.log( np.tan((90 + lat) * np.pi / 360.0 )) / (np.pi / 180.0)
+    my = my * originShift / 180.0
+    return mx, my
+
+
 class LLCTile:
     """This class describes a usable subregion of the LLC model"""
     
@@ -183,10 +193,69 @@ class LLCTile:
         return loadfunc(fname, self.Nface)[
                 zrange, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
     
-    def get_mean_position(self):
-        xmean = self.load_grid('XC.data', zrange=0).mean()
-        ymean = self.load_grid('YC.data', zrange=0).mean()
-        return (ymean,xmean)
+    def load_latlon(self):
+        self.lon = self.load_grid('XC.data', zrange=0)
+        self.lat = self.load_grid('YC.data', zrange=0)        
+        
+    # for resampling purposes
+    def export_geotiff(self, data, basename='tile'):
+        import pyresample
+        from osgeo import gdal, osr
+        
+        self.load_latlon()
+        # mask with the same mask as the input data
+        if hasattr(data, 'mask'):
+            lon = np.ma.masked_array(self.lon, data.mask)
+            lat = np.ma.masked_array(self.lat, data.mask)
+        else:
+            lon, lat = self.lon, self.lat
+        
+        # the "Google" projection
+        proj4_str = '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m'
+        proj4_str_full = proj4_str + ' +nadgrids=@null +wktext +no_defs'
+        
+        # determine the extent
+        #area_extent = np.hstack( [
+        #    latlon_to_meters((self.lat[0,0], self.lon[0,0])),
+        #    latlon_to_meters((self.lat[-1,-1], self.lon[-1,-1])) ] )
+        area_extent = np.hstack( [
+            latlon_to_meters((lat.min(), lon.min())),
+            latlon_to_meters((lat.max(), lon.max())) ] )
+
+        # set up pyresample to use the same resolution as the tile itself
+        area_def = pyresample.utils.get_area_def('tile%5d' % self.id, 'Google Maps Global Mercator', 'GMGM',
+                        proj4_str, self.Nx, self.Ny, area_extent)
+        grid_def = pyresample.geometry.GridDefinition(lons=lon, lats=lat)
+
+        # need to define the approximate grid size
+        dx = abs(area_extent[2] - area_extent[0]) / (self.Nx)
+        
+        # the heavy lifting
+        data_regrid = pyresample.kd_tree.resample_nearest(
+                grid_def, data, area_def, dx, fill_value=None)
+
+        # write using GDAL
+        dst_driver = gdal.GetDriverByName("GTiff")
+        srs = osr.SpatialReference()
+        srs.ImportFromProj4(proj4_str_full)
+
+        output_fname = '%s_%04d.tiff' % (basename, self.id)
+        dst_ds = dst_driver.Create(output_fname, self.Ny, self.Nx, 1 , gdal.GDT_Float32)
+
+        # this is key
+        # In a north up image, padfTransform[1] is the pixel width, and padfTransform[5] is the pixel height.
+        # The upper left corner of the upper left pixel is at position (padfTransform[0],padfTransform[3]).
+        # Xp = padfTransform[0] + P*padfTransform[1] + L*padfTransform[2];
+        # Yp = padfTransform[3] + P*padfTransform[4] + L*padfTransform[5];
+        geo_transform = (area_def.pixel_upper_left[0], area_def.pixel_size_x, 0,
+                                 area_def.pixel_upper_left[1], 0, area_def.pixel_size_y)
+        dst_ds.SetGeoTransform( geo_transform )
+
+        dst_ds.SetProjection(srs.ExportToWkt())
+        dst_ds.GetRasterBand(1).WriteArray(data_regrid.astype('<f4'))
+        dst_ds = None
+        return geo_transform
+        
         
     
         
