@@ -5,7 +5,8 @@ class LLCModel:
     """The parent object that describes a whole MITgcm Lat-Lon Cube setup."""
 
     def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
-        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4')):
+        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4')
+        L=20037508.342789244):
 
         self.Nfaces = Nfaces
         self.Nside = Nside
@@ -13,6 +14,7 @@ class LLCModel:
         self.Nz = Nz
         self.Nxtot = 4*Nside + Ntop # the total X dimension of the files
         self.dtype = default_dtype
+        self.L = L
         
         # default to working directory
         if data_dir is None:
@@ -166,6 +168,19 @@ def latlon_to_meters((lat,lon)):
     my = my * originShift / 180.0
     return mx, my
 
+def output_gdal_geotiff(data, fname, proj4_str, geo_transform):
+    from osgeo import gdal, osr    
+    dst_driver = gdal.GetDriverByName("GTiff")
+    srs = osr.SpatialReference()
+    srs.ImportFromProj4(proj4_str)
+    (Ny, Nx) = data.shape
+
+    dst_ds = dst_driver.Create(fname, Nx, Ny, 1 , gdal.GDT_Float32)
+    dst_ds.SetGeoTransform( geo_transform )
+    dst_ds.SetProjection(srs.ExportToWkt())
+    dst_ds.GetRasterBand(1).WriteArray(data.astype('<f4'))
+    dst_ds = None
+
 
 class LLCTile:
     """This class describes a usable subregion of the LLC model"""
@@ -194,21 +209,63 @@ class LLCTile:
                 zrange, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
     
     def load_latlon(self):
-        self.lon = self.load_grid('XC.data', zrange=0)
-        self.lat = self.load_grid('YC.data', zrange=0)        
+        if not hasattr(self, 'lon'):
+            self.lon = self.load_grid('XC.data', zrange=0)
+            self.lat = self.load_grid('YC.data', zrange=0)
+            
+    def pcolormesh(self, data, fname, clim=None, **kwargs):
+        """Output a tile that can be turned into a map"""
+        if data.shape != (self.Ny,self.Nx):
+            raise ValueError('Only 2D data of the correct shape can be pcolored')
+        
+        self.load_latlon()
+        lon, lat = self.lon.copy(), self.lat
+        if hasattr(data, 'mask'):
+            lon = np.ma.masked_array(lon, data.mask)
+            lat = np.ma.masked_array(lat, data.mask)
+            
+        # figure out if we need to wrap the dateline
+        wrap_flag =  (np.diff(lon,axis=1) < -180).any()
+        if wrap_flag:
+            lon[lon < 0.] -= 360.            
+
+        # figure out the size in lon, lat dimensions
+        dlon = 360. / (self.llc.Ntop*4)
+        lon_min, lon_max = lon.min(), lon.max()
+        lat_min, lat_max = lat.min(), lat.max()
+        # translate to a figure size
+        dpi = 80.
+        figsize = (lon_max-lon_min)/dlon/dpi, (lat_max-lat_min)/dlon/dpi
+        
+        import matplotlib.pyplot as plt
+        fig = plt.figure(figsize=figsize, dpi=dpi)
+        ax = fig.add_axes([0,0,1,1])
+        ax.set_xlim((lon_min,lon_max))
+        ax.set_ylim((lat_min,lat_max))
+        pc = ax.pcolormesh(lon, lat, data)
+        ax.set_axis_off()
+        #if clim is not None:
+        #    pc.set_clim(clim)
+        
+        fig.savefig(fname, dpi=dpi, figsize=figsize, transparent=True)
+        return figsize
+    
         
     # for resampling purposes
     def export_geotiff(self, data, basename='tile'):
         import pyresample
-        from osgeo import gdal, osr
         
         self.load_latlon()
         # mask with the same mask as the input data
         if hasattr(data, 'mask'):
-            lon = np.ma.masked_array(self.lon, data.mask)
+            lon = np.ma.masked_array(self.lon, data.mask).copy()
             lat = np.ma.masked_array(self.lat, data.mask)
         else:
-            lon, lat = self.lon, self.lat
+            lon, lat = self.lon.copy(), self.lat
+            
+        # detect a jump
+        if (np.diff(lon,axis=1)<-350).any():
+            lon[lon<0] += 360.
         
         # the "Google" projection
         proj4_str = '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m'
@@ -234,28 +291,36 @@ class LLCTile:
         data_regrid = pyresample.kd_tree.resample_nearest(
                 grid_def, data, area_def, dx, fill_value=None)
 
+        # find out if we have to split the tile
+        L = self.LLC.L
+        x,y = area_def.get_proj_coords()
+        if  x[0,-1] > L:
+            i_split = (x[0,:] > L).nonzero()[0][0]
+        else:
+            i_split = self.Nx
+            
         # write using GDAL
-        dst_driver = gdal.GetDriverByName("GTiff")
-        srs = osr.SpatialReference()
-        srs.ImportFromProj4(proj4_str_full)
-
-        output_fname = '%s_%04d.tiff' % (basename, self.id)
-        dst_ds = dst_driver.Create(output_fname,
-            int(self.Ny), int(self.Nx), 1 , gdal.GDT_Float32)
-
+        
+	output_fname = '%s_%04da.tiff' % (basename, self.id)
         # this is key
         # In a north up image, padfTransform[1] is the pixel width, and padfTransform[5] is the pixel height.
         # The upper left corner of the upper left pixel is at position (padfTransform[0],padfTransform[3]).
         # Xp = padfTransform[0] + P*padfTransform[1] + L*padfTransform[2];
         # Yp = padfTransform[3] + P*padfTransform[4] + L*padfTransform[5];
-        geo_transform = (area_def.pixel_upper_left[0], area_def.pixel_size_x, 0,
-                                 area_def.pixel_upper_left[1], 0, area_def.pixel_size_y)
-        dst_ds.SetGeoTransform( geo_transform )
+        geo_transform_a = (x[0,0], area_def.pixel_size_x, 0,
+                         y[0,0], 0, -area_def.pixel_size_y)
+        geo_transform_b = None
 
-        dst_ds.SetProjection(srs.ExportToWkt())
-        dst_ds.GetRasterBand(1).WriteArray(data_regrid.astype('<f4'))
-        dst_ds = None
-        return geo_transform
+        output_gdal_geotiff(data_regrid[:,:i_split], output_fname, proj4_str_full, geo_transform_a)
+        
+        if i_split < self.Nx:
+            output_fname_b = '%s_%04db.tiff' % (basename, self.id)
+            geo_transform_b = (x[0,i_split]-(2*L), area_def.pixel_size_x, 0,
+                             y[0,i_split], 0, -area_def.pixel_size_y)
+            output_gdal_geotiff(data_regrid[:,i_split:].copy(), output_fname_b, proj4_str_full, geo_transform_b)
+        
+        return (geo_transform_a, geo_transform_b, data_regrid)
+        
         
         
     
