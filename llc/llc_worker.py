@@ -5,7 +5,7 @@ class LLCModel:
     """The parent object that describes a whole MITgcm Lat-Lon Cube setup."""
 
     def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
-        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4')
+        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4'),
         L=20037508.342789244):
 
         self.Nfaces = Nfaces
@@ -227,7 +227,7 @@ class LLCTile:
         # figure out if we need to wrap the dateline
         wrap_flag =  (np.diff(lon,axis=1) < -180).any()
         if wrap_flag:
-            lon[lon < 0.] -= 360.            
+            lon[lon <= 0.] += 360.            
 
         # figure out the size in lon, lat dimensions
         dlon = 360. / (self.llc.Ntop*4)
@@ -244,10 +244,22 @@ class LLCTile:
         ax.set_ylim((lat_min,lat_max))
         pc = ax.pcolormesh(lon, lat, data)
         ax.set_axis_off()
-        #if clim is not None:
-        #    pc.set_clim(clim)
+        if clim is not None:
+            pc.set_clim(clim)
         
         fig.savefig(fname, dpi=dpi, figsize=figsize, transparent=True)
+        plt.close(fig)
+        
+        # write world file
+        wf = open('%sw' % fname, 'w')
+        wf.write('%10.9f \n' % dlon) # pixel X size
+        wf.write('%10.9f \n' % 0.) # rotation about x axis
+        wf.write('%10.9f \n' % 0.) # rotation about y axis
+        wf.write('%10.9f \n' % -dlon) # pixel Y size
+        wf.write('%10.9f \n' % lon_min) # X coordinate of upper left pixel center
+        wf.write('%10.9f \n' % lat_max) # Y coordinate of upper left pixel center
+        wf.close()
+        
         return figsize
     
         
