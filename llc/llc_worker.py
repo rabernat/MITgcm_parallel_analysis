@@ -214,7 +214,7 @@ class LLCTile:
             self.lat = self.load_grid('YC.data', zrange=0)
         
             
-    def pcolormesh(self, data, fname, clim=None, **kwargs):
+    def pcolormesh(self, data, fname, proj=False, clim=None, **kwargs):
         """Output a tile that can be turned into a map"""
         if data.shape != (self.Ny,self.Nx):
             raise ValueError('Only 2D data of the correct shape can be pcolored')
@@ -247,23 +247,38 @@ class LLCTile:
         lat_quad[:self.Ny, -1] = lat_g[:,-1]
         lat_quad[-1, -1] = lat_quad[-1, -2]
 
-        # figure out the size in lon, lat dimensions
-        dlon = 360. / (self.llc.Ntop*4)
+        if proj:
+            x_quad, y_quad = latlon_to_meters((lat_quad, lon_quad))
+            x_c, y_c = latlon_to_meters(
+                (np.ma.masked_array(lat_c, data.mask),
+                 np.ma.masked_array(lon_c, data.mask)))
+            dx = 2*self.llc.L / (self.llc.Ntop*4)
+            xlim_true, ylim_true = self.llc.L, self.llc.L
+        else:
+            x_quad, y_quad = lon_quad, lat_quad    
+            x_c = np.ma.masked_array(lon_c, data.mask)
+            y_c = np.ma.masked_array(lat_c, data.mask)
+            dx = 360. / (self.llc.Ntop*4)
+            xlim_true, ylim_true = 180.,90.
+
         # get the bounds only on the non-masked data
-        lon_mask = np.ma.masked_array(lon_c, data.mask)
-        lat_mask = np.ma.masked_array(lat_c, data.mask)
-        lon_min, lon_max = lon_mask.min(), lon_mask.max()
-        lat_min, lat_max = lat_mask.min(), lat_mask.max()
-        # translate to a figure size
+        # doing this on x screws up the automatic wrapping
+        #x_min = max(x_c.min(), -xlim_true)
+        #x_max = min(x_c.max(), xlim_true)
+        pad = 5*dx
+        x_min, x_max = x_c.min()-pad, x_c.max()+pad
+        y_min = max(y_c.min()-pad, -ylim_true)
+        y_max = min(y_c.max()+pad, ylim_true)
+        
         dpi = 80.
-        figsize = (lon_max-lon_min)/dlon/dpi, (lat_max-lat_min)/dlon/dpi
+        figsize = (x_max-x_min)/dx/dpi, (y_max-y_min)/dx/dpi
         
         import matplotlib.pyplot as plt
         fig = plt.figure(figsize=figsize, dpi=dpi)
         ax = fig.add_axes([0,0,1,1])
-        ax.set_xlim((lon_min,lon_max))
-        ax.set_ylim((lat_min,lat_max))
-        pc = ax.pcolormesh(lon_quad, lat_quad, data)
+        ax.set_xlim((x_min, x_max))
+        ax.set_ylim((y_min, y_max))
+        pc = ax.pcolormesh(x_quad, y_quad, data)
         ax.set_axis_off()
         if clim is not None:
             pc.set_clim(clim)
@@ -273,15 +288,15 @@ class LLCTile:
         
         # write world file
         wf = open('%sw' % fname, 'w')
-        wf.write('%10.9f \n' % dlon) # pixel X size
+        wf.write('%10.9f \n' % dx) # pixel X size
         wf.write('%10.9f \n' % 0.) # rotation about x axis
         wf.write('%10.9f \n' % 0.) # rotation about y axis
-        wf.write('%10.9f \n' % -dlon) # pixel Y size
-        wf.write('%10.9f \n' % lon_min) # X coordinate of upper left pixel center
-        wf.write('%10.9f \n' % lat_max) # Y coordinate of upper left pixel center
+        wf.write('%10.9f \n' % -dx) # pixel Y size
+        wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
+        wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
         wf.close()
         
-        return ((lon_min,lat_min,lon_max,lat_max),figsize)
+        return ((x_min,y_min,x_max,y_max),figsize)
     
         
     # for resampling purposes

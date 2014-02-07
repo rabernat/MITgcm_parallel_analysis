@@ -22,7 +22,8 @@ def work_on_tile(tile):
     if True:
         depth = np.ma.masked_equal(tile.load_grid('Depth.data', zrange=0),0)
         if ( depth > 0.).any():
-            res = tile.pcolormesh(depth, 'tile_images/depth_%04d.png' % tile.id, clim=[0,6000])
+            res = tile.pcolormesh(depth, 'tile_images/depth_%04d.png' % tile.id,
+                 proj=True, clim=[0,6000])
             return (tile.id, res)
         return None
 
