@@ -240,7 +240,8 @@ class LLCTile:
         srs.ImportFromProj4(proj4_str_full)
 
         output_fname = '%s_%04d.tiff' % (basename, self.id)
-        dst_ds = dst_driver.Create(output_fname, self.Ny, self.Nx, 1 , gdal.GDT_Float32)
+        dst_ds = dst_driver.Create(output_fname,
+            int(self.Ny), int(self.Nx), 1 , gdal.GDT_Float32)
 
         # this is key
         # In a north up image, padfTransform[1] is the pixel width, and padfTransform[5] is the pixel height.
