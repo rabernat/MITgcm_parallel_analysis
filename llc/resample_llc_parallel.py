@@ -1,4 +1,5 @@
 import numpy as np
+import pylab as plt
 from IPython.parallel import Client
 from itertools import imap
 import llc_worker
@@ -20,10 +21,28 @@ def work_on_tile(tile):
     if tile.Nface < 4:
         depth = np.ma.masked_equal(tile.load_grid('Depth.data', zrange=0),0)
         if ( depth > 0.).any():
-            return tile.export_geotiff(depth, 'tile_images/depth')
+            return ((tile.Nface,tile.id), tile.export_geotiff(depth, 'tile_images/depth'))
         return None
 
+L = 20037508.
+fig = plt.figure()
+ax = plt.axes()
+N = 540
+ax.set_xlim([-L,L]); ax.set_ylim([-L,L])
 for res in lbv.map_async(work_on_tile, LLC.get_tile_factory()):
+#for res in map(work_on_tile, LLC.get_tile_factory()):
     print res
-    #print 'Tile mean position: ', res
-
+    if res is not None:
+        id,Nface = res[0]
+        geom_a,geom_b = res[1]
+        x0,y0,dx,dy = np.array(geom_a)[np.r_[0,3,1,5]]
+        ax.plot([x0, x0 + N*dx, x0 + N*dx, x0, x0],[y0, y0, y0 + N*dy, y0 + N*dy, y0])
+        ax.text( x0 + N*dx/2, y0 + N*dy/2, '%g (%ga)' % (id, Nface), ha='center')
+        if geom_b is not None:
+            x0,y0,dx,dy = np.array(geom_b)[np.r_[0,3,1,5]]
+            ax.plot([x0, x0 + N*dx, x0 + N*dx, x0, x0],[y0, y0, y0 + N*dy, y0 + N*dy, y0])
+            ax.text( x0 + N*dx/2, y0 + N*dy/2, '%g (%gb)' % (id, Nface), ha='center')
+            
+        plt.draw()
+        plt.show()
+        plt.pause(0.1)
