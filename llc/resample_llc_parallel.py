@@ -10,9 +10,9 @@ LLC = llc_worker.LLCModel1080(
         data_dir = os.path.join(base_dir, 'run_day732_896'),
         grid_dir = os.path.join(base_dir, 'grid'))
 
-c = Client(profile='default')
-dview = c.direct_view()
-lbv = c.load_balanced_view()
+#c = Client(profile='default')
+#dview = c.direct_view()
+#lbv = c.load_balanced_view()
     
 def work_on_tile(tile):
     import llc_worker
@@ -20,8 +20,13 @@ def work_on_tile(tile):
     # only work on lat-lon tiles
     if tile.Nface < 4:
         depth = np.ma.masked_equal(tile.load_grid('Depth.data', zrange=0),0)
+        tid = np.ma.masked_array(tile.id*np.ones(depth.shape), depth.mask)
         if ( depth > 0.).any():
-            return ((tile.Nface,tile.id), tile.export_geotiff(depth, 'tile_images/depth'))
+            geom_a,geom_b,data_regrid =  tile.export_geotiff(tid, 'tile_images/depth')
+            if tile.id==30:
+                plt.figure(2)
+                plt.pcolormesh(np.ma.masked_array(data_regrid))
+            return ((tile.Nface,tile.id),(geom_a, geom_b))
         return None
 
 L = 20037508.
@@ -29,8 +34,8 @@ fig = plt.figure()
 ax = plt.axes()
 N = 540
 ax.set_xlim([-L,L]); ax.set_ylim([-L,L])
-for res in lbv.map_async(work_on_tile, LLC.get_tile_factory()):
-#for res in map(work_on_tile, LLC.get_tile_factory()):
+#for res in lbv.map_async(work_on_tile, LLC.get_tile_factory()):
+for res in map(work_on_tile, LLC.get_tile_factory()):
     print res
     if res is not None:
         id,Nface = res[0]
