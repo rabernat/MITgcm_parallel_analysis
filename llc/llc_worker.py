@@ -212,27 +212,48 @@ class LLCTile:
         if not hasattr(self, 'lon'):
             self.lon = self.load_grid('XC.data', zrange=0)
             self.lat = self.load_grid('YC.data', zrange=0)
+        
             
     def pcolormesh(self, data, fname, clim=None, **kwargs):
         """Output a tile that can be turned into a map"""
         if data.shape != (self.Ny,self.Nx):
             raise ValueError('Only 2D data of the correct shape can be pcolored')
         
-        self.load_latlon()
-        lon, lat = self.lon.copy(), self.lat
-        if hasattr(data, 'mask'):
-            lon = np.ma.masked_array(lon, data.mask)
-            lat = np.ma.masked_array(lat, data.mask)
-            
-        # figure out if we need to wrap the dateline
-        wrap_flag =  (np.diff(lon,axis=1) < -180).any()
+        # load both corner and centers, necessary for pcolor
+        lon_c = self.load_grid('XC.data', zrange=0)
+        lat_c = self.load_grid('YC.data', zrange=0)
+        lon_g = self.load_grid('XG.data', zrange=0)
+        lat_g = self.load_grid('YG.data', zrange=0)
+        
+        # wrap if necessary
+        wrap_flag =  (np.diff(lon_g,axis=1) < -180).any()
         if wrap_flag:
-            lon[lon <= 0.] += 360.            
+            lon_c = np.copy(lon_c)
+            lon_g = np.copy(lon_g)
+            lon_g[lon_g < 0.] += 360.          
+            lon_c[lon_c < 0.] += 360.          
+        
+        # create bounds for pcolor
+        dx_lon = 2*(lon_c[:,-1] - lon_g[:,-1])
+        dy_lat = 2*(lat_c[-1,:] - lat_g[-1,:])
+        lon_quad = np.zeros((self.Ny+1, self.Nx+1), self.llc.dtype)
+        lat_quad = np.zeros((self.Ny+1, self.Nx+1), self.llc.dtype)
+        lon_quad[:self.Ny, :self.Nx] = lon_g
+        lat_quad[:self.Ny, :self.Nx] = lat_g
+        lon_quad[:self.Ny, -1] = lon_g[:,-1] + dx_lon
+        lon_quad[-1, :self.Nx] = lon_g[-1,:]
+        lon_quad[-1, -1] = lon_quad[-2, -1]
+        lat_quad[-1, :self.Nx] = lat_g[-1,:] + dy_lat
+        lat_quad[:self.Ny, -1] = lat_g[:,-1]
+        lat_quad[-1, -1] = lat_quad[-1, -2]
 
         # figure out the size in lon, lat dimensions
         dlon = 360. / (self.llc.Ntop*4)
-        lon_min, lon_max = lon.min(), lon.max()
-        lat_min, lat_max = lat.min(), lat.max()
+        # get the bounds only on the non-masked data
+        lon_mask = np.ma.masked_array(lon_c, data.mask)
+        lat_mask = np.ma.masked_array(lat_c, data.mask)
+        lon_min, lon_max = lon_mask.min(), lon_mask.max()
+        lat_min, lat_max = lat_mask.min(), lat_mask.max()
         # translate to a figure size
         dpi = 80.
         figsize = (lon_max-lon_min)/dlon/dpi, (lat_max-lat_min)/dlon/dpi
@@ -242,7 +263,7 @@ class LLCTile:
         ax = fig.add_axes([0,0,1,1])
         ax.set_xlim((lon_min,lon_max))
         ax.set_ylim((lat_min,lat_max))
-        pc = ax.pcolormesh(lon, lat, data)
+        pc = ax.pcolormesh(lon_quad, lat_quad, data)
         ax.set_axis_off()
         if clim is not None:
             pc.set_clim(clim)
@@ -260,7 +281,7 @@ class LLCTile:
         wf.write('%10.9f \n' % lat_max) # Y coordinate of upper left pixel center
         wf.close()
         
-        return figsize
+        return ((lon_min,lat_min,lon_max,lat_max),figsize)
     
         
     # for resampling purposes
