@@ -272,7 +272,9 @@ class LLCTile:
         
         dpi = 80.
         figsize = (x_max-x_min)/dx/dpi, (y_max-y_min)/dx/dpi
-        
+       
+        import matplotlib
+        matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         fig = plt.figure(figsize=figsize, dpi=dpi)
         ax = fig.add_axes([0,0,1,1])
