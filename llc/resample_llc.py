@@ -4,10 +4,9 @@ import pyresample
 import os
 import time
 
-#base_dir = '/Volumes/Bucket1/llc/llc_1080'
-base_dir = os.path.join(os.environ['LLC'], 'llc_4320')
-LLC = llc_worker.LLCModel4320(
-        data_dir = os.path.join(base_dir, 'MITgcm/run'),
+base_dir = os.path.join(os.environ['LLC'], 'llc_1080')
+LLC = llc_worker.LLCModel1080(
+        data_dir = os.path.join(base_dir, 'run_day732_896'),
         grid_dir = os.path.join(base_dir, 'grid'))
 
 # earth radius
