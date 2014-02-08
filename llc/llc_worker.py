@@ -212,37 +212,75 @@ class LLCTile:
         if not hasattr(self, 'lon'):
             self.lon = self.load_grid('XC.data', zrange=0)
             self.lat = self.load_grid('YC.data', zrange=0)
+        
             
-    def pcolormesh(self, data, fname, clim=None, **kwargs):
+    def pcolormesh(self, data, fname, proj=False, clim=None, **kwargs):
         """Output a tile that can be turned into a map"""
         if data.shape != (self.Ny,self.Nx):
             raise ValueError('Only 2D data of the correct shape can be pcolored')
         
-        self.load_latlon()
-        lon, lat = self.lon.copy(), self.lat
-        if hasattr(data, 'mask'):
-            lon = np.ma.masked_array(lon, data.mask)
-            lat = np.ma.masked_array(lat, data.mask)
-            
-        # figure out if we need to wrap the dateline
-        wrap_flag =  (np.diff(lon,axis=1) < -180).any()
-        if wrap_flag:
-            lon[lon <= 0.] += 360.            
-
-        # figure out the size in lon, lat dimensions
-        dlon = 360. / (self.llc.Ntop*4)
-        lon_min, lon_max = lon.min(), lon.max()
-        lat_min, lat_max = lat.min(), lat.max()
-        # translate to a figure size
-        dpi = 80.
-        figsize = (lon_max-lon_min)/dlon/dpi, (lat_max-lat_min)/dlon/dpi
+        # load both corner and centers, necessary for pcolor
+        lon_c = self.load_grid('XC.data', zrange=0)
+        lat_c = self.load_grid('YC.data', zrange=0)
+        lon_g = self.load_grid('XG.data', zrange=0)
+        lat_g = self.load_grid('YG.data', zrange=0)
         
+        # wrap if necessary
+        wrap_flag =  (np.diff(lon_g,axis=1) < -180).any()
+        if wrap_flag:
+            lon_c = np.copy(lon_c)
+            lon_g = np.copy(lon_g)
+            lon_g[lon_g < 0.] += 360.          
+            lon_c[lon_c < 0.] += 360.          
+        
+        # create bounds for pcolor
+        dx_lon = 2*(lon_c[:,-1] - lon_g[:,-1])
+        dy_lat = 2*(lat_c[-1,:] - lat_g[-1,:])
+        lon_quad = np.zeros((self.Ny+1, self.Nx+1), self.llc.dtype)
+        lat_quad = np.zeros((self.Ny+1, self.Nx+1), self.llc.dtype)
+        lon_quad[:self.Ny, :self.Nx] = lon_g
+        lat_quad[:self.Ny, :self.Nx] = lat_g
+        lon_quad[:self.Ny, -1] = lon_g[:,-1] + dx_lon
+        lon_quad[-1, :self.Nx] = lon_g[-1,:]
+        lon_quad[-1, -1] = lon_quad[-2, -1]
+        lat_quad[-1, :self.Nx] = lat_g[-1,:] + dy_lat
+        lat_quad[:self.Ny, -1] = lat_g[:,-1]
+        lat_quad[-1, -1] = lat_quad[-1, -2]
+
+        if proj:
+            x_quad, y_quad = latlon_to_meters((lat_quad, lon_quad))
+            x_c, y_c = latlon_to_meters(
+                (np.ma.masked_array(lat_c, data.mask),
+                 np.ma.masked_array(lon_c, data.mask)))
+            dx = 2*self.llc.L / (self.llc.Ntop*4)
+            xlim_true, ylim_true = self.llc.L, self.llc.L
+        else:
+            x_quad, y_quad = lon_quad, lat_quad    
+            x_c = np.ma.masked_array(lon_c, data.mask)
+            y_c = np.ma.masked_array(lat_c, data.mask)
+            dx = 360. / (self.llc.Ntop*4)
+            xlim_true, ylim_true = 180.,90.
+
+        # get the bounds only on the non-masked data
+        # doing this on x screws up the automatic wrapping
+        #x_min = max(x_c.min(), -xlim_true)
+        #x_max = min(x_c.max(), xlim_true)
+        pad = 5*dx
+        x_min, x_max = x_c.min()-pad, x_c.max()+pad
+        y_min = max(y_c.min()-pad, -ylim_true)
+        y_max = min(y_c.max()+pad, ylim_true)
+        
+        dpi = 80.
+        figsize = (x_max-x_min)/dx/dpi, (y_max-y_min)/dx/dpi
+       
+        import matplotlib
+        matplotlib.use('Agg')
         import matplotlib.pyplot as plt
         fig = plt.figure(figsize=figsize, dpi=dpi)
         ax = fig.add_axes([0,0,1,1])
-        ax.set_xlim((lon_min,lon_max))
-        ax.set_ylim((lat_min,lat_max))
-        pc = ax.pcolormesh(lon, lat, data)
+        ax.set_xlim((x_min, x_max))
+        ax.set_ylim((y_min, y_max))
+        pc = ax.pcolormesh(x_quad, y_quad, data)
         ax.set_axis_off()
         if clim is not None:
             pc.set_clim(clim)
@@ -252,15 +290,15 @@ class LLCTile:
         
         # write world file
         wf = open('%sw' % fname, 'w')
-        wf.write('%10.9f \n' % dlon) # pixel X size
+        wf.write('%10.9f \n' % dx) # pixel X size
         wf.write('%10.9f \n' % 0.) # rotation about x axis
         wf.write('%10.9f \n' % 0.) # rotation about y axis
-        wf.write('%10.9f \n' % -dlon) # pixel Y size
-        wf.write('%10.9f \n' % lon_min) # X coordinate of upper left pixel center
-        wf.write('%10.9f \n' % lat_max) # Y coordinate of upper left pixel center
+        wf.write('%10.9f \n' % -dx) # pixel Y size
+        wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
+        wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
         wf.close()
         
-        return figsize
+        return ((x_min,y_min,x_max,y_max),figsize)
     
         
     # for resampling purposes
@@ -312,7 +350,8 @@ class LLCTile:
             i_split = self.Nx
             
         # write using GDAL
-        output_fname = '%s_%04da.tiff' % (basename, self.id)
+        
+	output_fname = '%s_%04da.tiff' % (basename, self.id)
         # this is key
         # In a north up image, padfTransform[1] is the pixel width, and padfTransform[5] is the pixel height.
         # The upper left corner of the upper left pixel is at position (padfTransform[0],padfTransform[3]).
