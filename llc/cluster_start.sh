@@ -1,1 +1,2 @@
-ipcluster start --n=1 --work-dir=`pwd`
+ipcluster start --n=124 --work-dir=`pwd` --engines=MPIEngineSetLauncher
+
