@@ -45,7 +45,7 @@ class LLCModel:
 
     def load_data_file(self, fname, *args):
         return self.memmap_face(
-            os.path.join(self.data_dir, fname) *args)
+            os.path.join(self.data_dir, fname), *args)
 
     def load_grid_file(self, fname, *args):
         return self.memmap_face(
@@ -55,16 +55,29 @@ class LLCModel:
         """Returns a memmap to the requested face"""
 
         # figure out the size of the file
-        fsize = os.path.getsize(fname)
-        Nz = fsize / self.dtype.itemsize / self.Ntop / self.Nxtot
-        if Nz==1 or Nz==self.Nz:
-            mmshape = (Nz,self.Ntop,self.Nxtot)
+        varsize = os.path.getsize(fname) / self.dtype.itemsize
+        
+        is_vertical = True
+        # for vertical coordinates
+        if varsize == self.Nz:
+            mmshape = (self.Nz, 1, 1)
+        elif varsize == (self.Nz+1):
+            mmshape = (self.Nz+1, 1, 1)
         else:
-            raise IOError('File %s is the wrong size' % fname)
+            is_vertical = False
+            Nz = varsize / self.Ntop / self.Nxtot
+            if Nz==1 or Nz==self.Nz:
+                mmshape = (Nz,self.Ntop,self.Nxtot)
+            else:
+                raise IOError('File %s is the wrong size' % fname)
 
         # read the data as a memmap
         mm = np.memmap(fname, mode='r', dtype=self.dtype,
                     order='F', shape=mmshape)
+                    
+        # just bail if it is a vertical file
+        if is_vertical:
+            return mm
 
         # true face index
         N = self.faceorder[Nface]
@@ -96,14 +109,21 @@ class LLCModel:
         
 # extend the basic class for the specific grids
 class LLCModel4320(LLCModel):
-    """A specific LLC grid."""
-    
+    """LLC grid for 4230 domain size."""
     def __init__(self, *args, **kwargs):
         LLCModel.__init__(self,
             Nfaces=5, Nside=12960, Ntop=4320, Nz=90,
             *args, **kwargs)
-            
+
+class LLCModel2160(LLCModel):
+    """LLC grid for 2160 domain size."""
+    def __init__(self, *args, **kwargs):
+        LLCModel.__init__(self,
+            Nfaces=5, Nside=6480, Ntop=2160, Nz=90,
+            *args, **kwargs)
+
 class LLCModel1080(LLCModel):
+    """LLC grid for 1080 domain size."""
     def __init__(self, *args, **kwargs):
         LLCModel.__init__(self,
             Nfaces=5, Nside=3240, Ntop=1080, Nz=90,
@@ -155,9 +175,8 @@ class LLCTileFactory:
     
     def get_tile(self, Ntile):
         Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
-        # this is annoying
+        # this is annoying, not implemented yet
         
-
 # a utility function
 def latlon_to_meters((lat,lon)):
     """Converts given lat/lon in WGS84 Datum to XY in Spherical Mercator EPSG:900913"""
@@ -167,20 +186,6 @@ def latlon_to_meters((lat,lon)):
     my = np.log( np.tan((90 + lat) * np.pi / 360.0 )) / (np.pi / 180.0)
     my = my * originShift / 180.0
     return mx, my
-
-def output_gdal_geotiff(data, fname, proj4_str, geo_transform):
-    from osgeo import gdal, osr    
-    dst_driver = gdal.GetDriverByName("GTiff")
-    srs = osr.SpatialReference()
-    srs.ImportFromProj4(proj4_str)
-    (Ny, Nx) = data.shape
-
-    dst_ds = dst_driver.Create(fname, Nx, Ny, 1 , gdal.GDT_Float32)
-    dst_ds.SetGeoTransform( geo_transform )
-    dst_ds.SetProjection(srs.ExportToWkt())
-    dst_ds.GetRasterBand(1).WriteArray(data.astype('<f4'))
-    dst_ds = None
-
 
 class LLCTile:
     """This class describes a usable subregion of the LLC model"""
@@ -198,21 +203,77 @@ class LLCTile:
     def load_grid(self, fname, **kwargs):
         return self.load_data(fname, grid=True, **kwargs)
     
-    def load_data(self, fname, zrange=None, grid=False):
-        if zrange is None:
-            zrange = np.r_[:self.llc.Nz]
+    def load_data(self, fname, grid=False):
         if grid:
             loadfunc = self.llc.load_grid_file
         else:
             loadfunc = self.llc.load_data_file    
         return loadfunc(fname, self.Nface)[
-                zrange, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
-    
-    def load_latlon(self):
-        if not hasattr(self, 'lon'):
-            self.lon = self.load_grid('XC.data', zrange=0)
-            self.lat = self.load_grid('YC.data', zrange=0)
+                :, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
+
+    def load_geometry(self):
+        """This loads the grid geometry into local variables.
+        But they aren't actually read from disk until you try to access them"""
+
+        # horizontal grid
+        self.x = dict(
+         C = self.load_grid('XC.data'),
+         G = self.load_grid('XG.data')  )
+        self.y = dict(
+         C = self.load_grid('YC.data'),
+         G = self.load_grid('YG.data')  )
+        self.dx = dict(
+         C = self.load_grid('DXC.data'),
+         G = self.load_grid('DXG.data') )
+        self.dy = dict(
+         C = self.load_grid('DYC.data'),
+         G = self.load_grid('DYG.data') )
+            
+        # vertical grid
+        self.r = dict(
+         C = self.load_grid('RC.data'),
+         F = self.load_grid('RF.data') )
+        self.dr = dict(
+         C = self.load_grid('DRC.data'),
+         F = self.load_grid('DRF.data') )
+        self.depth = self.load_grid('Depth.data')
         
+        self.z = self.r
+        self.dz = self.dr
+        
+        # area information
+        self.ra = dict(
+         C = self.load_grid('RAC.data'),
+         S = self.load_grid('RAS.data'),
+         W = self.load_grid('RAW.data'),
+         Z = self.load_grid('RAZ.data') )
+        self.hfac = dict(
+         C = self.load_grid('hFacC.data'),
+         S = self.load_grid('hFacS.data'),
+         W = self.load_grid('hFacW.data') )
+        
+    def integrate_vertical(self, data, krange=None, rpt='C', hpt='C'):
+        if krange is None:
+            krange = np.r_[:self.Nz]
+        return np.sum( data[krange] *
+            self.dz[rpt][krange] * self.hfac[hpt][krange], axis=0 )
+    
+    def average_vertical(self, data, **kwargs):
+        return (self.integrate_vertical(data, **kwargs) / 
+                self.integrate_vertical(np.ones((self.llc.Nz,1,1)), **kwargs) )
+        
+    # DERIVATIVES in the horizontal
+    # Derivatives are problematic because in theory we need to communicate
+    # with other tiles. For now, we solve this by assuming that, since the domains
+    # are so huge, we can throw away results at the edge of the tile.
+    # The real solution is to implement a halo.
+    
+    # try to define the derivatives using the same notation as MITgcm documentation
+    def delta_i(self, data):
+        return data[:,:,1:] - data[:,:,:-1]
+    
+    def delta_j(self, data):
+        return data[:,1:,:] - data[:,:-1,:]
             
     def pcolormesh(self, data, fname, proj=False, clim=None, **kwargs):
         """Output a tile that can be turned into a map"""
@@ -261,10 +322,7 @@ class LLCTile:
             dx = 360. / (self.llc.Ntop*4)
             xlim_true, ylim_true = 180.,90.
 
-        # get the bounds only on the non-masked data
-        # doing this on x screws up the automatic wrapping
-        #x_min = max(x_c.min(), -xlim_true)
-        #x_max = min(x_c.max(), xlim_true)
+        # bounds for the output image
         pad = 5*dx
         x_min, x_max = x_c.min()-pad, x_c.max()+pad
         y_min = max(y_c.min()-pad, -ylim_true)
@@ -300,76 +358,6 @@ class LLCTile:
         
         return ((x_min,y_min,x_max,y_max),figsize)
     
-        
-    # for resampling purposes
-    def export_geotiff(self, data, basename='tile'):
-        import pyresample
-        
-        self.load_latlon()
-        # mask with the same mask as the input data
-        if hasattr(data, 'mask'):
-            lon = np.ma.masked_array(self.lon, data.mask).copy()
-            lat = np.ma.masked_array(self.lat, data.mask)
-        else:
-            lon, lat = self.lon.copy(), self.lat
-            
-        # detect a jump
-        if (np.diff(lon,axis=1)<-350).any():
-            lon[lon<0] += 360.
-        
-        # the "Google" projection
-        proj4_str = '+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m'
-        proj4_str_full = proj4_str + ' +nadgrids=@null +wktext +no_defs'
-        
-        # determine the extent
-        #area_extent = np.hstack( [
-        #    latlon_to_meters((self.lat[0,0], self.lon[0,0])),
-        #    latlon_to_meters((self.lat[-1,-1], self.lon[-1,-1])) ] )
-        area_extent = np.hstack( [
-            latlon_to_meters((lat.min(), lon.min())),
-            latlon_to_meters((lat.max(), lon.max())) ] )
-
-        # set up pyresample to use the same resolution as the tile itself
-        area_def = pyresample.utils.get_area_def('tile%5d' % self.id, 'Google Maps Global Mercator', 'GMGM',
-                        proj4_str, self.Nx, self.Ny, area_extent)
-        grid_def = pyresample.geometry.GridDefinition(lons=lon, lats=lat)
-
-        # need to define the approximate grid size
-        dx = abs(area_extent[2] - area_extent[0]) / (self.Nx)
-        
-        # the heavy lifting
-        data_regrid = pyresample.kd_tree.resample_nearest(
-                grid_def, data, area_def, dx, fill_value=None)
-
-        # find out if we have to split the tile
-        L = self.LLC.L
-        x,y = area_def.get_proj_coords()
-        if  x[0,-1] > L:
-            i_split = (x[0,:] > L).nonzero()[0][0]
-        else:
-            i_split = self.Nx
-            
-        # write using GDAL
-        
-	output_fname = '%s_%04da.tiff' % (basename, self.id)
-        # this is key
-        # In a north up image, padfTransform[1] is the pixel width, and padfTransform[5] is the pixel height.
-        # The upper left corner of the upper left pixel is at position (padfTransform[0],padfTransform[3]).
-        # Xp = padfTransform[0] + P*padfTransform[1] + L*padfTransform[2];
-        # Yp = padfTransform[3] + P*padfTransform[4] + L*padfTransform[5];
-        geo_transform_a = (x[0,0], area_def.pixel_size_x, 0,
-                         y[0,0], 0, -area_def.pixel_size_y)
-        geo_transform_b = None
-
-        output_gdal_geotiff(data_regrid[:,:i_split], output_fname, proj4_str_full, geo_transform_a)
-        
-        if i_split < self.Nx:
-            output_fname_b = '%s_%04db.tiff' % (basename, self.id)
-            geo_transform_b = (x[0,i_split]-(2*L), area_def.pixel_size_x, 0,
-                             y[0,i_split], 0, -area_def.pixel_size_y)
-            output_gdal_geotiff(data_regrid[:,i_split:].copy(), output_fname_b, proj4_str_full, geo_transform_b)
-        
-        return (geo_transform_a, geo_transform_b, data_regrid)
         
         
         
