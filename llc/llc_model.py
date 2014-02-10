@@ -31,19 +31,20 @@ class LLCModel:
             (Ntop, Ntop),  # cap face
             (Ntop, Nside), # third LL face (transposed)
             (Ntop, Nside)] # fourth LL face (transposed)
-            #(Nside, Ntop), # third LL face (transposed)
-            #(Nside, Ntop)] # fourth LL face (transposed)
             )
             
         # whether to reshape the face
         self.reshapeface = [False,False,False,True,True]
-        # whether to transpose to the face
-        self.transposeface = [True,True,False,False,False]
+        # which axis is longitude
+        self.lonaxis = [2,2,2,1,1]
         # put the cap face at the end
         self.faceorder = [0,1,3,4,2]            
 
     def _facedim(self,Nface):
         return self.facedims[self.faceorder[Nface]]
+        
+    def _lonaxis(self,Nface):
+        return self.lonaxis[self.faceorder[Nface]]
 
     def load_data_file(self, fname, *args):
         return self.memmap_face(
@@ -89,8 +90,9 @@ class LLCModel:
         mm = mm[:,idx_lims[N]:idx_lims[N+1]]
         dims = self.facedims[N]
         if self.reshapeface[N]:
-            # needs to be reshaped and transposed
+            # needs to be reshaped
             mm = mm.reshape((Nz,self.Ntop,self.Nside), order='C')
+            # but not transposed
             #mm = mm.transpose((0,2,1))
             #mm = mm[:,::-1,:]
         return mm
@@ -200,6 +202,7 @@ class LLCTile:
         self.Ny = ylims[1] - ylims[0]
         self.id = tile_id
         self.shape = (self.llc.Nz, self.Ny, self.Nx)
+        self.lonaxis = self.llc._lonaxis(Nface)
     
     def load_grid(self, fname, **kwargs):
         return self.load_data(fname, grid=True, **kwargs)
@@ -297,7 +300,7 @@ class LLCTile:
         #lat_g = self.load_grid('YG.data', zrange=0)
         
         # wrap if necessary
-        wrap_flag =  (np.diff(lon_g,axis=1) < -180).any()
+        wrap_flag =  (np.diff(lon_g,axis=self.lonaxis-1) < -180).any()
         if wrap_flag:
             lon_c = np.copy(lon_c)
             lon_g = np.copy(lon_g)
