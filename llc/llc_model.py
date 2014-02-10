@@ -26,11 +26,13 @@ class LLCModel:
         
         # default grid layout within output files (I hope all LLC setups are like this)
         self.facedims=np.array([
-            (Ntop, Nside), # first LL face
-            (Ntop, Nside), # second LL face
+            (Nside, Ntop), # first LL face
+            (Nside, Ntop), # second LL face
             (Ntop, Ntop),  # cap face
             (Ntop, Nside), # third LL face (transposed)
             (Ntop, Nside)] # fourth LL face (transposed)
+            #(Nside, Ntop), # third LL face (transposed)
+            #(Nside, Ntop)] # fourth LL face (transposed)
             )
             
         # whether to reshape the face
@@ -67,13 +69,13 @@ class LLCModel:
             is_vertical = False
             Nz = varsize / self.Ntop / self.Nxtot
             if Nz==1 or Nz==self.Nz:
-                mmshape = (Nz,self.Ntop,self.Nxtot)
+                mmshape = (Nz, self.Nxtot, self.Ntop)
             else:
                 raise IOError('File %s is the wrong size' % fname)
 
         # read the data as a memmap
         mm = np.memmap(fname, mode='r', dtype=self.dtype,
-                    order='F', shape=mmshape)
+                    order='C', shape=mmshape)
                     
         # just bail if it is a vertical file
         if is_vertical:
@@ -84,14 +86,13 @@ class LLCModel:
         
         # the start and stop location of the face on disk
         idx_lims = np.hstack([0,np.cumsum(self.facedims.prod(axis=1)/self.Ntop)])
-        mm = mm[:,:,idx_lims[N]:idx_lims[N+1]]
+        mm = mm[:,idx_lims[N]:idx_lims[N+1]]
         dims = self.facedims[N]
         if self.reshapeface[N]:
-            # needs to be transposed
-            mm = mm.reshape((Nz,self.Nside,self.Ntop), order='F')
-            mm = mm[:,::-1,:]
-        if self.transposeface[N]:
-            mm = mm.transpose((0,2,1))
+            # needs to be reshaped and transposed
+            mm = mm.reshape((Nz,self.Ntop,self.Nside), order='C')
+            #mm = mm.transpose((0,2,1))
+            #mm = mm[:,::-1,:]
         return mm
         
     def describe_faces(self):
@@ -142,7 +143,7 @@ class LLCTileFactory:
             # make sure the shapes are compatible
             if np.mod(dims[0],tileshape[0]) or np.mod(dims[1],tileshape[1]):
                 raise ValueError('Tile shape is not compatible with face dimensions')
-            tdims = (dims[1]/tileshape[1], dims[0]/tileshape[0])
+            tdims = (dims[0]/tileshape[0], dims[1]/tileshape[1])
             self.tiledim.append( tdims )
             print ' face %g: %g x %g tiles' % (n, tdims[0], tdims[1])
         self.tiledim = np.array(self.tiledim)
@@ -166,8 +167,8 @@ class LLCTileFactory:
             self._idx_face += 1
         if self._idx_face==self.llc.Nfaces:
             raise StopIteration
-        xlims = self.tileshape[1] * np.r_[self._idx_x,self._idx_x+1]
-        ylims = self.tileshape[0] * np.r_[self._idx_y,self._idx_y+1]
+        xlims = self.tileshape[0] * np.r_[self._idx_x,self._idx_x+1]
+        ylims = self.tileshape[1] * np.r_[self._idx_y,self._idx_y+1]
         self._idx_x += 1
         self._ntile += 1
         return LLCTile(self.llc, self._idx_face,
@@ -208,7 +209,12 @@ class LLCTile:
             loadfunc = self.llc.load_grid_file
         else:
             loadfunc = self.llc.load_data_file    
-        return loadfunc(fname, self.Nface)[
+        data = loadfunc(fname, self.Nface)
+        if (data.shape[1]==1) and (data.shape[2]==1):
+            # its a 1d vertical file
+            return data
+        else:
+            return data[
                 :, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
 
     def load_geometry(self):
@@ -256,7 +262,7 @@ class LLCTile:
         if krange is None:
             krange = np.r_[:self.Nz]
         return np.sum( data[krange] *
-            self.dz[rpt][krange] * self.hfac[hpt][krange], axis=0 )
+            self.dz[rpt][krange] * self.hfac[hpt][krange], axis=0 )[np.newaxis,:,:]
     
     def average_vertical(self, data, **kwargs):
         return (self.integrate_vertical(data, **kwargs) / 
@@ -281,10 +287,14 @@ class LLCTile:
             raise ValueError('Only 2D data of the correct shape can be pcolored')
         
         # load both corner and centers, necessary for pcolor
-        lon_c = self.load_grid('XC.data', zrange=0)
-        lat_c = self.load_grid('YC.data', zrange=0)
-        lon_g = self.load_grid('XG.data', zrange=0)
-        lat_g = self.load_grid('YG.data', zrange=0)
+        lon_c = self.x['C'][0]
+        lat_c = self.y['C'][0]
+        lon_g = self.x['G'][0]
+        lat_g = self.y['G'][0]
+        #lon_c = self.load_grid('XC.data', zrange=0)
+        #lat_c = self.load_grid('YC.data', zrange=0)
+        #lon_g = self.load_grid('XG.data', zrange=0)
+        #lat_g = self.load_grid('YG.data', zrange=0)
         
         # wrap if necessary
         wrap_flag =  (np.diff(lon_g,axis=1) < -180).any()
@@ -338,7 +348,7 @@ class LLCTile:
         ax = fig.add_axes([0,0,1,1])
         ax.set_xlim((x_min, x_max))
         ax.set_ylim((y_min, y_max))
-        pc = ax.pcolormesh(x_quad, y_quad, data)
+        pc = ax.pcolormesh(x_quad, y_quad, data, **kwargs)
         ax.set_axis_off()
         if clim is not None:
             pc.set_clim(clim)
