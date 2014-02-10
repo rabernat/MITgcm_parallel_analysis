@@ -347,27 +347,32 @@ class LLCTile:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
-        fig = plt.figure(figsize=figsize, dpi=dpi)
-        ax = fig.add_axes([0,0,1,1])
-        ax.set_xlim((x_min, x_max))
-        ax.set_ylim((y_min, y_max))
-        pc = ax.pcolormesh(x_quad, y_quad, data, **kwargs)
-        ax.set_axis_off()
-        if clim is not None:
-            pc.set_clim(clim)
         
-        fig.savefig(fname, dpi=dpi, figsize=figsize, transparent=True)
-        plt.close(fig)
+        try:
+            fig = plt.figure(figsize=figsize, dpi=dpi)
+            ax = fig.add_axes([0,0,1,1])
+            ax.set_xlim((x_min, x_max))
+            ax.set_ylim((y_min, y_max))
+            pc = ax.pcolormesh(x_quad, y_quad, data, **kwargs)
+            ax.set_axis_off()
+            if clim is not None:
+                pc.set_clim(clim)
         
-        # write world file
-        wf = open('%sw' % fname, 'w')
-        wf.write('%10.9f \n' % dx) # pixel X size
-        wf.write('%10.9f \n' % 0.) # rotation about x axis
-        wf.write('%10.9f \n' % 0.) # rotation about y axis
-        wf.write('%10.9f \n' % -dx) # pixel Y size
-        wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
-        wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
-        wf.close()
+            fig.savefig(fname, dpi=dpi, figsize=figsize, transparent=True)
+            plt.close(fig)
+            
+            # write world file
+            wf = open('%sw' % fname, 'w')
+            wf.write('%10.9f \n' % dx) # pixel X size
+            wf.write('%10.9f \n' % 0.) # rotation about x axis
+            wf.write('%10.9f \n' % 0.) # rotation about y axis
+            wf.write('%10.9f \n' % -dx) # pixel Y size
+            wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
+            wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
+            wf.close()
+        except ValueError:
+            pass
+
         
         return ((x_min,y_min,x_max,y_max),figsize)
     
