@@ -52,7 +52,8 @@ def work_on_tile(tile):
     mask = (tile.hfac['C'][0]==0.)[np.newaxis,:,:]
     #mask = (tile.depth[0]==0.)[np.newaxis,:,:]
 
-    if mask.all():
+    # make sure we have a decent number of points to work on
+    if ((~mask).sum() < 100):
         return None
     else:
         # integrate over top five levels
@@ -72,7 +73,7 @@ def work_on_tile(tile):
         tile.pcolormesh(vort, figdir + 'vort_%04d.png' % tile.id,
              proj=True, clim=[-1e-4, 1e-4], cmap=plt.get_cmap('bwr'))
     
-        return np.sqrt(vort**2).mean()
+        return tile.id, np.sqrt(vort**2).mean()
 
 for vort_mean in mapfunc(work_on_tile, LLC.get_tile_factory()):
     print vort_mean
