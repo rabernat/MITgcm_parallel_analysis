@@ -38,7 +38,10 @@ class LLCModel:
         # which axis is longitude
         self.lonaxis = [2,2,2,1,1]
         # put the cap face at the end
-        self.faceorder = [0,1,3,4,2]            
+        self.faceorder = [0,1,3,4,2]
+        
+        # a name for the run
+        self.name = 'llc_%04d' % self.Ntop         
 
     def _facedim(self,Nface):
         return self.facedims[self.faceorder[Nface]]
@@ -189,7 +192,7 @@ def latlon_to_meters((lat,lon)):
     my = np.log( np.tan((90 + lat) * np.pi / 360.0 )) / (np.pi / 180.0)
     my = my * originShift / 180.0
     return mx, my
-
+    
 class LLCTile:
     """This class describes a usable subregion of the LLC model"""
     
@@ -284,10 +287,16 @@ class LLCTile:
     def delta_j(self, data):
         return data[:,1:,:] - data[:,:-1,:]
             
-    def pcolormesh(self, data, fname, proj=False, clim=None, **kwargs):
+    def pcolormesh(self, data, fname, proj=True, clim=None, shade=False, **kwargs):
         """Output a tile that can be turned into a map"""
         if data.shape != (self.Ny,self.Nx):
             raise ValueError('Only 2D data of the correct shape can be pcolored')
+        
+        # import plotting modules
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LightSource
         
         # load both corner and centers, necessary for pcolor
         lon_c = self.x['C'][0]
@@ -343,33 +352,43 @@ class LLCTile:
         
         dpi = 80.
         figsize = (x_max-x_min)/dx/dpi, (y_max-y_min)/dx/dpi
-       
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
         
         try:
+            
             fig = plt.figure(figsize=figsize, dpi=dpi)
             ax = fig.add_axes([0,0,1,1])
             ax.set_xlim((x_min, x_max))
             ax.set_ylim((y_min, y_max))
-            pc = ax.pcolormesh(x_quad, y_quad, data, **kwargs)
             ax.set_axis_off()
+            pc = ax.pcolormesh(x_quad, y_quad, data, **kwargs)
             if clim is not None:
-                pc.set_clim(clim)
-        
+                pc.set_clim(clim)    
             fig.savefig(fname, dpi=dpi, figsize=figsize, transparent=True)
-            plt.close(fig)
             
+            figfiles = [fname]
+            # generate another image that is for shading
+            if shade:
+                # draw using grayscale
+                suff = fname[-4] == '.png'
+                new_fname = fname[:-4] + "_bw.png"
+                pc.remove()
+                pc = ax.pcolormesh(x_quad, y_quad, data, cmap=plt.cm.binary)
+                if clim is not None:
+                    pc.set_clim(clim)
+                fig.savefig(new_fname, dpi=dpi, figsize=figsize, transparent=True)
+                figfiles.append(new_fname)
+            plt.close(fig)
+        
             # write world file
-            wf = open('%sw' % fname, 'w')
-            wf.write('%10.9f \n' % dx) # pixel X size
-            wf.write('%10.9f \n' % 0.) # rotation about x axis
-            wf.write('%10.9f \n' % 0.) # rotation about y axis
-            wf.write('%10.9f \n' % -dx) # pixel Y size
-            wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
-            wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
-            wf.close()
+            for filename in figfiles:
+                wf = open('%sw' % filename, 'w')
+                wf.write('%10.9f \n' % dx) # pixel X size
+                wf.write('%10.9f \n' % 0.) # rotation about x axis
+                wf.write('%10.9f \n' % 0.) # rotation about y axis
+                wf.write('%10.9f \n' % -dx) # pixel Y size
+                wf.write('%10.9f \n' % x_min) # X coordinate of upper left pixel center
+                wf.write('%10.9f \n' % y_max) # Y coordinate of upper left pixel center
+                wf.close()
         except ValueError:
             pass
 
