@@ -1,20 +1,17 @@
 import numpy as np
 import os
+from MITgcmutils import mds
+    
+class MITgcmModel(object):
+    """The parent object that describes a generic MITgcm setup."""
 
-class LLCModel:
-    """The parent object that describes a whole MITgcm Lat-Lon Cube setup."""
+    def __init__(self, Nx=None, Ny=None, Nz=None,
+        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4')):
 
-    def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
-        data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4'),
-        L=20037508.342789244):
-
-        self.Nfaces = Nfaces
-        self.Nside = Nside
-        self.Ntop = Ntop
+        self.Nx = Nx
+        self.Ny = Ny
         self.Nz = Nz
-        self.Nxtot = 4*Nside + Ntop # the total X dimension of the files
         self.dtype = default_dtype
-        self.L = L
         
         # default to working directory
         if data_dir is None:
@@ -24,31 +21,6 @@ class LLCModel:
         self.data_dir = data_dir
         self.grid_dir = grid_dir   
         
-        # default grid layout within output files (I hope all LLC setups are like this)
-        self.facedims=np.array([
-            (Nside, Ntop), # first LL face
-            (Nside, Ntop), # second LL face
-            (Ntop, Ntop),  # cap face
-            (Ntop, Nside), # third LL face (transposed)
-            (Ntop, Nside)] # fourth LL face (transposed)
-            )
-            
-        # whether to reshape the face
-        self.reshapeface = [False,False,False,True,True]
-        # which axis is longitude
-        self.lonaxis = [2,2,2,1,1]
-        # put the cap face at the end
-        self.faceorder = [0,1,3,4,2]
-        
-        # a name for the run
-        self.name = 'llc_%04d' % self.Ntop         
-
-    def _facedim(self,Nface):
-        return self.facedims[self.faceorder[Nface]]
-        
-    def _lonaxis(self,Nface):
-        return self.lonaxis[self.faceorder[Nface]]
-
     def load_data_file(self, fname, *args):
         return self.memmap_face(
             os.path.join(self.data_dir, fname), *args)
@@ -112,91 +84,11 @@ class LLCModel:
             
     def get_tile_factory(self, **kwargs):
         return LLCTileFactory(self, **kwargs)
-        
-# extend the basic class for the specific grids
-class LLCModel4320(LLCModel):
-    """LLC grid for 4230 domain size."""
-    def __init__(self, *args, **kwargs):
-        LLCModel.__init__(self,
-            Nfaces=5, Nside=12960, Ntop=4320, Nz=90,
-            *args, **kwargs)
-
-class LLCModel2160(LLCModel):
-    """LLC grid for 2160 domain size."""
-    def __init__(self, *args, **kwargs):
-        LLCModel.__init__(self,
-            Nfaces=5, Nside=6480, Ntop=2160, Nz=90,
-            *args, **kwargs)
-
-class LLCModel1080(LLCModel):
-    """LLC grid for 1080 domain size."""
-    def __init__(self, *args, **kwargs):
-        LLCModel.__init__(self,
-            Nfaces=5, Nside=3240, Ntop=1080, Nz=90,
-            *args, **kwargs)
-
-class LLCTileFactory:
-    """Has generator for splitting domain into tiles."""
     
-    def __init__(self, llc_model_parent, tileshape=(540,540)):
-        self.llc = llc_model_parent
-        self.tileshape = tileshape
-        self.tiledim = []
-        print 'Using tile shape %g x %g' % tileshape
-        for n in range(self.llc.Nfaces):
-            dims = self.llc._facedim(n)
-            # make sure the shapes are compatible
-            if np.mod(dims[0],tileshape[0]) or np.mod(dims[1],tileshape[1]):
-                raise ValueError('Tile shape is not compatible with face dimensions')
-            tdims = (dims[0]/tileshape[0], dims[1]/tileshape[1])
-            self.tiledim.append( tdims )
-            print ' face %g: %g x %g tiles' % (n, tdims[0], tdims[1])
-        self.tiledim = np.array(self.tiledim)
-        self.Ntiles = self.tiledim.prod(axis=1).sum()
-        print 'Total tiles: %g' % self.Ntiles
-        # indices for iterator
-        self._idx_face = 0
-        self._idx_x = 0
-        self._idx_y = 0
-        self._ntile = 0
+class MITgcmTile(object):
+    """This class describes a locally regular portion of an MITgcm model grid"""
     
-    def __iter__(self):
-        return self
-        
-    def next(self):
-        if self._idx_x==self.tiledim[self._idx_face][1]:
-            self._idx_x = 0
-            self._idx_y += 1
-        if self._idx_y==self.tiledim[self._idx_face][0]:
-            self._idx_y = 0
-            self._idx_face += 1
-        if self._idx_face==self.llc.Nfaces:
-            raise StopIteration
-        xlims = self.tileshape[0] * np.r_[self._idx_x,self._idx_x+1]
-        ylims = self.tileshape[1] * np.r_[self._idx_y,self._idx_y+1]
-        self._idx_x += 1
-        self._ntile += 1
-        return LLCTile(self.llc, self._idx_face,
-                        ylims, xlims, self._ntile-1)
-    
-    def get_tile(self, Ntile):
-        Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
-        # this is annoying, not implemented yet
-        
-# a utility function
-def latlon_to_meters((lat,lon)):
-    """Converts given lat/lon in WGS84 Datum to XY in Spherical Mercator EPSG:900913"""
-    a = 6378137.
-    originShift = 2 * np.pi * a / 2.
-    mx = lon * originShift / 180.0
-    my = np.log( np.tan((90 + lat) * np.pi / 360.0 )) / (np.pi / 180.0)
-    my = my * originShift / 180.0
-    return mx, my
-    
-class LLCTile:
-    """This class describes a usable subregion of the LLC model"""
-    
-    def __init__(self, llc_model_parent, Nface, ylims, xlims, tile_id):
+    def __init__(self, ylims, xlims):
         self.llc = llc_model_parent
         self.Nface = Nface
         self.ylims = ylims
@@ -210,6 +102,7 @@ class LLCTile:
     def load_grid(self, fname, **kwargs):
         return self.load_data(fname, grid=True, **kwargs)
     
+    # this class should be overwritten by the llc methods
     def load_data(self, fname, grid=False):
         if grid:
             loadfunc = self.llc.load_grid_file
