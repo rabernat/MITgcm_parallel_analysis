@@ -1,3 +1,39 @@
+import os
+import sys
+
+# add parent directory to python path
+# (because we do not "install" the llc module)
+sys.path.append('..')
+from llc import llc_model
+
+# the lower resoltuion
+base_dir_1080 = os.path.join(os.environ['LLC'], 'llc_1080')
+LLC1080 = llc_model.LLCModel1080(
+    data_dir = os.path.join(base_dir_1080, 'run_day732_896'),
+    grid_dir = os.path.join(base_dir_1080, 'grid'))
+
+# higher resolution
+base_dir_4320 = os.path.join(os.environ['LLC'], 'llc_4320')
+LLC4320 = llc_model.LLCModel4320(
+        data_dir = os.path.join(base_dir_4320, 'MITgcm/run'),
+        grid_dir = os.path.join(base_dir_4320, 'grid'))
+
+# set make this True to use parallel execution
+try:
+    from IPython.parallel import Client
+    # connect to ipcluster server
+    c = Client(profile='mpi')
+    dview = c.direct_view()
+    # there has to be a way around doing this
+    lbv = c.load_balanced_view()
+    mapfunc = lbv.map_async
+except ValueError:
+    # just use serial execution
+    print "Couldn't connect to ipcluster. Using serial execution."
+    mapfunc = map
+    
+    
+    
 # all the imports must be done inside the function
 # the working directory is MITgcm_parallel_analysis (the parent of this one)
 
@@ -13,7 +49,7 @@ def work_on_tile(tile):
     
     #iter = 777480
     iter = 221760
-    figdir = '../figures/%s' % tile.llc.name
+    figdir = 'figures/%s' % tile.llc.name
     
     # load grid data
     tile.load_geometry()
@@ -45,3 +81,6 @@ def work_on_tile(tile):
 
     
     
+for result in mapfunc(work_on_tile, LLC4320.get_tile_factory()):
+    print result
+

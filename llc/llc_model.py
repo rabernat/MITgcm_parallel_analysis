@@ -203,6 +203,7 @@ class LLCTile:
         self.xlims = xlims
         self.Nx = xlims[1] - xlims[0]
         self.Ny = ylims[1] - ylims[0]
+        self.Nz = self.llc.Nz
         self.id = tile_id
         self.shape = (self.llc.Nz, self.Ny, self.Nx)
         self.lonaxis = self.llc._lonaxis(Nface)

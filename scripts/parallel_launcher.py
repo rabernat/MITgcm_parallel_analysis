@@ -35,8 +35,8 @@ except ValueError:
 # import whatever module will do the work
 # it must define a function called work_on_tile(tile)
 import plot_theta
-
-for result in mapfunc(plot_theta.work_on_tile, LLC1080.get_tile_factory()):
+workfun = plot_theta.work_on_tile
+for result in mapfunc(workfun, LLC1080.get_tile_factory()):
     print result
 
     
