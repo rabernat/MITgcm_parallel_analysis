@@ -13,6 +13,9 @@ class LLCModel:
         self.Ntop = Ntop
         self.Nz = Nz
         self.Nxtot = 4*Nside + Ntop # the total X dimension of the files
+        self.Nxlon = 4*Ntop # the number of points around a latitude circle
+        # the total number of values in a single variable
+        self.Ntot = self.Nz*self.Nxtot*self.Ntop
         self.dtype = default_dtype
         self.L = L
         
@@ -48,6 +51,12 @@ class LLCModel:
         
     def _lonaxis(self,Nface):
         return self.lonaxis[self.faceorder[Nface]]
+        
+    # for just getting a direct memmap    
+    def load_data_raw(self, fname):
+        return np.memmap(
+                os.path.join(self.data_dir, fname), 
+                mode='r', dtype=self.dtype)
 
     def load_data_file(self, fname, *args):
         return self.memmap_face(
@@ -113,6 +122,9 @@ class LLCModel:
     def get_tile_factory(self, **kwargs):
         return LLCTileFactory(self, **kwargs)
         
+    def get_time_averager_factory(self, **kwargs):
+        return LLCTimeAveragerFactory(self, **kwargs)
+        
 # extend the basic class for the specific grids
 class LLCModel4320(LLCModel):
     """LLC grid for 4230 domain size."""
@@ -135,6 +147,87 @@ class LLCModel1080(LLCModel):
             Nfaces=5, Nside=3240, Ntop=1080, Nz=90,
             *args, **kwargs)
 
+class LLCTimeAveragerFactory:
+    
+    """For the simple/easy job of time averaging."""
+    def __init__(self, llc_model_parent, varnames=[], iters=[],
+                    Nprocs=1,
+                    output_dir=None, maxmem=1073741824):
+        self.llc = llc_model_parent
+        self.varnames = varnames
+        self.Nvars = len(varnames)
+        self.iters = iters
+        self.Niters = len(iters)
+        self.output_dir = output_dir
+        self.Nprocs = Nprocs
+
+        if mod(self.llc.Ntot, self.Nprocs) != 0:
+            raise ValueError('The variable size is not divisible by the number of processes')
+        # the number of items in each engine's variable
+        self.Nitems = self.llc.Ntop / self.Nprocs
+
+        memneeded = self.Nitems * self.Nvars  * self.llc.dtype.itemsize
+        if memneed > maxmem:
+            raise MemoryError(
+             'The operation will require more memory (%g) that the maximum allowed per process (%g)' % (memneeded,maxmem))
+        
+        # set up output files
+        self.output_files = dict()
+        for v in varnames:
+            fname = os.path.join(self.output,dir,'%s.TAVE.data' % v)
+            # create the file
+            mm = np.memmap(fname, dtype=self.llc.dtype, mode='w+', shape=(self.llc.Ntot))
+            del mm # flush the buffer to file
+            self.output_files[v] = fname
+            
+        # initialize engines
+        self.engines = []
+        for n in range(self.Nprocs):
+            self.engines.append(
+                LLCTimeAveragerEngine(self, n)
+            )
+
+class LLCTimeAveragerEngine:
+    
+    def __init__(self, parent, n):
+        self.parent = parent
+        self.dtype = self.parent.llc.dtype
+        self.Nitems = self.parent.Nitems
+        self.offset = self.Nitems * n
+                
+    def process(self):
+        # set up accumulators
+        count = 0
+        avg_vars = dict()
+        for v in self.parent.varnames:
+            avg_vars[v] = np.zeros((self.Nitems,), self.dtype)
+        
+        for i in self.parent.iters:
+            for v in self.parent.varnames:
+                mm = np.memmap(
+                  os.path.join(self.parent.llc.data_dir,
+                   '%s.%010.data' % (v, i)),
+                   dtype = self.dtype,
+                   mode = 'r',
+                   shape = (self.Nitems,),
+                   offset = self.offset
+                )
+                avg_vars[v] += mm
+                del mm
+            count += 1
+        
+        # write
+        for v in self.parent.varnames:
+            mm = np.memmap(
+               self.parent.output_files[v],
+               dtype = self.dtype,
+               mode = 'r+',
+               shape = (self.Nitems,),
+               offset = self.offset
+            )
+            mm[:] = avg_vars[n] / count
+            del mm            
+
 class LLCTileFactory:
     """Has generator for splitting domain into tiles."""
     
@@ -154,6 +247,9 @@ class LLCTileFactory:
         self.tiledim = np.array(self.tiledim)
         self.Ntiles = self.tiledim.prod(axis=1).sum()
         print 'Total tiles: %g' % self.Ntiles
+        self._reset_iterator()
+        
+    def _reset_iterator(self):
         # indices for iterator
         self._idx_face = 0
         self._idx_x = 0
@@ -180,8 +276,11 @@ class LLCTileFactory:
                         ylims, xlims, self._ntile-1)
     
     def get_tile(self, Ntile):
-        Nface = np.argmax(cumsum(self.tiledim.prod(axis=1))>Ntile)
-        # this is annoying, not implemented yet
+        self._reset_iterator()
+        for t in self:
+            if Ntile == t.id:
+                break
+        return t
         
 # a utility function
 def latlon_to_meters((lat,lon)):
@@ -218,10 +317,10 @@ class LLCTile:
         data = loadfunc(fname, self.Nface)
         if (data.shape[1]==1) and (data.shape[2]==1):
             # its a 1d vertical file
-            return data
+            return data.view(np.ndarray)
         else:
             return data[
-                :, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ]
+                :, self.ylims[0]:self.ylims[1], self.xlims[0]:self.xlims[1] ].view(np.ndarray)
 
     def load_geometry(self):
         """This loads the grid geometry into local variables.
