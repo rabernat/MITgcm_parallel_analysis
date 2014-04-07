@@ -152,7 +152,7 @@ class LLCTimeAveragerFactory:
     """For the simple/easy job of time averaging."""
     def __init__(self, llc_model_parent, varnames=[], iters=[],
                     Nprocs=1,
-                    output_dir=None, maxmem=1073741824):
+                    output_dir=None, maxmem=`1073741824`):
         self.llc = llc_model_parent
         self.varnames = varnames
         self.Nvars = len(varnames)
@@ -161,22 +161,22 @@ class LLCTimeAveragerFactory:
         self.output_dir = output_dir
         self.Nprocs = Nprocs
 
-        if mod(self.llc.Ntot, self.Nprocs) != 0:
+        if np.mod(self.llc.Ntot, self.Nprocs) != 0:
             raise ValueError('The variable size is not divisible by the number of processes')
         # the number of items in each engine's variable
-        self.Nitems = self.llc.Ntop / self.Nprocs
+        self.Nitems = self.llc.Ntot / self.Nprocs
 
         memneeded = self.Nitems * self.Nvars  * self.llc.dtype.itemsize
-        if memneed > maxmem:
+        if memneeded > maxmem:
             raise MemoryError(
              'The operation will require more memory (%g) that the maximum allowed per process (%g)' % (memneeded,maxmem))
         
         # set up output files
         self.output_files = dict()
         for v in varnames:
-            fname = os.path.join(self.output,dir,'%s.TAVE.data' % v)
+            fname = os.path.join(self.output_dir,'%s.TAVE.data' % v)
             # create the file
-            mm = np.memmap(fname, dtype=self.llc.dtype, mode='w+', shape=(self.llc.Ntot))
+            mm = np.memmap(fname, dtype=self.llc.dtype, mode='w+', shape=(self.llc.Ntot,))
             del mm # flush the buffer to file
             self.output_files[v] = fname
             
@@ -193,7 +193,7 @@ class LLCTimeAveragerEngine:
         self.parent = parent
         self.dtype = self.parent.llc.dtype
         self.Nitems = self.parent.Nitems
-        self.offset = self.Nitems * n
+        self.offset = self.Nitems * n * self.dtype.itemsize
                 
     def process(self):
         # set up accumulators
@@ -206,7 +206,7 @@ class LLCTimeAveragerEngine:
             for v in self.parent.varnames:
                 mm = np.memmap(
                   os.path.join(self.parent.llc.data_dir,
-                   '%s.%010.data' % (v, i)),
+                   '%s.%010d.data' % (v, i)),
                    dtype = self.dtype,
                    mode = 'r',
                    shape = (self.Nitems,),
@@ -225,7 +225,7 @@ class LLCTimeAveragerEngine:
                shape = (self.Nitems,),
                offset = self.offset
             )
-            mm[:] = avg_vars[n] / count
+            mm[:] = avg_vars[v] / count
             del mm            
 
 class LLCTileFactory:
