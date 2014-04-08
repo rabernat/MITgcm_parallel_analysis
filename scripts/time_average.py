@@ -20,7 +20,7 @@ LLC = llc_model.LLCModel1080(
         #data_dir = os.path.join(base_dir, 'MITgcm/run'),
         grid_dir = os.path.join(base_dir, 'grid'))
 
-iters = [777480,]
+iters = [777480,777481]
 varnames = ['Salt']
 #varnames = ['Theta', 'Salt', 'U', 'V', 'W']
 
@@ -35,7 +35,8 @@ dview.execute('import sys')
 dview.execute("sys.path.append('..')")
 dview.execute("from llc import llc_model")
 
-Nprocs = len(dview)
+#Nprocs = len(dview)
+Nprocs = 24
 
 GB = 1073741824
 averager = LLC.get_time_averager_factory(
@@ -43,10 +44,11 @@ averager = LLC.get_time_averager_factory(
                 iters=iters,
                 Nprocs=Nprocs,
                 output_dir=tave_output_dir,
-                maxmem=4*GB)
+                maxmem=40*GB)
 
 # send out the segments to be processed
 dview.scatter('ae', averager.engines)
-dview.execute('ae[0].process()')
+dview.block = False
+res=dview.execute('res = [e.process() for e in ae]')
 
 

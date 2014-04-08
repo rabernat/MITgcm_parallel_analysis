@@ -204,7 +204,7 @@ class LLCTimeAveragerEngine:
         
         for i in self.parent.iters:
             for v in self.parent.varnames:
-                print 'Processing %s %010d' % (v,i)
+                print 'Processing %s %010d offset %12i' % (v,i,self.offset)
                 if use_memmap:
                     mm = np.memmap(
                       os.path.join(self.parent.llc.data_dir,
@@ -222,13 +222,14 @@ class LLCTimeAveragerEngine:
                     mm = np.fromfile(f, dtype=self.dtype,
                                 count=self.Nitems)
                     f.close()
+                print '  variable size %12i' % len(mm)
                 avg_vars[v] += mm
                 del mm
             count += 1
         
         # write
         for v in self.parent.varnames:
-            print 'Outputting %s' % self.parent.output_files[v]
+            print 'Outputting %s offset %12i' % (self.parent.output_files[v],self.offset)
             mm = np.memmap(
                self.parent.output_files[v],
                dtype = self.dtype,
