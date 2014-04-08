@@ -195,7 +195,7 @@ class LLCTimeAveragerEngine:
         self.Nitems = self.parent.Nitems
         self.offset = self.Nitems * n * self.dtype.itemsize
                 
-    def process(self):
+    def process(self, use_memmap=False):
         # set up accumulators
         count = 0
         avg_vars = dict()
@@ -204,20 +204,31 @@ class LLCTimeAveragerEngine:
         
         for i in self.parent.iters:
             for v in self.parent.varnames:
-                mm = np.memmap(
-                  os.path.join(self.parent.llc.data_dir,
-                   '%s.%010d.data' % (v, i)),
-                   dtype = self.dtype,
-                   mode = 'r',
-                   shape = (self.Nitems,),
-                   offset = self.offset
-                )
+                print 'Processing %s %010d' % (v,i)
+                if use_memmap:
+                    mm = np.memmap(
+                      os.path.join(self.parent.llc.data_dir,
+                       '%s.%010d.data' % (v, i)),
+                       dtype = self.dtype,
+                       mode = 'r',
+                       shape = (self.Nitems,),
+                       offset = self.offset
+                    )
+                else:
+                    f = open(
+                      os.path.join(self.parent.llc.data_dir,
+                      '%s.%010d.data' % (v, i)), 'r' )
+                    f.seek(self.offset)
+                    mm = np.fromfile(f, dtype=self.dtype,
+                                count=self.Nitems)
+                    f.close()
                 avg_vars[v] += mm
                 del mm
             count += 1
         
         # write
         for v in self.parent.varnames:
+            print 'Outputting %s' % self.parent.output_files[v]
             mm = np.memmap(
                self.parent.output_files[v],
                dtype = self.dtype,

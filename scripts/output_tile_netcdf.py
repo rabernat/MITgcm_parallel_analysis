@@ -28,6 +28,8 @@ S = tile.load_data('Salt.%010d.data' % iter )
 U = tile.load_data('U.%010d.data' % iter)
 V = tile.load_data('V.%010d.data' % iter)
 W = tile.load_data('W.%010d.data' % iter)
+Phibot = tile.load_data('PhiBot.%010d.data' % iter)
+Eta = tile.load_data('Eta.%010d.data' % iter)
 
 fname = '../tile_data/LLC4320_%04d_%010d.nc' % (tile.id, iter) 
 f = netcdf_file(fname, 'w')
@@ -103,6 +105,13 @@ tvar.units = 'degrees C'
 svar = f.createVariable('S', 'f', ('Nzc','Ny','Nx'))
 svar[:] = S
 svar.units = 'PSU'
+# surface and bottom data
+pvar = f.createVariable('Phibot', 'f', ('Ny','Nx'))
+pvar[:] = Phibot.squeeze()
+pvar.units = 'm^2 / s^2'
+evar = f.createVariable('Eta', 'f', ('Ny','Nx'))
+evar[:] = Eta.squeeze()
+evar.units = 'm'
 
 
 f.close()
