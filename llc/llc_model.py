@@ -6,7 +6,7 @@ class LLCModel:
 
     def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
         data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4'),
-        L=20037508.342789244):
+        L=20037508.342789244, use_memmap=True):
 
         self.Nfaces = Nfaces
         self.Nside = Nside
@@ -26,6 +26,10 @@ class LLCModel:
             grid_dir = '.'
         self.data_dir = data_dir
         self.grid_dir = grid_dir   
+
+        # caching
+        self._cache_fname = ''
+        self._cache_data = None
         
         # default grid layout within output files (I hope all LLC setups are like this)
         self.facedims=np.array([
@@ -44,7 +48,9 @@ class LLCModel:
         self.faceorder = [0,1,3,4,2]
         
         # a name for the run
-        self.name = 'llc_%04d' % self.Ntop         
+        self.name = 'llc_%04d' % self.Ntop   
+
+        self.use_memmap = use_memmap
 
     def _facedim(self,Nface):
         return self.facedims[self.faceorder[Nface]]
@@ -54,9 +60,14 @@ class LLCModel:
         
     # for just getting a direct memmap    
     def load_data_raw(self, fname):
-        return np.memmap(
+        if self.use_memmap:
+            return np.memmap(
                 os.path.join(self.data_dir, fname), 
                 mode='r', dtype=self.dtype)
+        else:
+            return np.fromfile(
+                 os.path.join(self.data_dir, fname),
+                 dtype=self.dtype)
 
     def load_data_file(self, fname, *args):
         return self.memmap_face(
@@ -86,10 +97,25 @@ class LLCModel:
             else:
                 raise IOError('File %s is the wrong size' % fname)
 
-        # read the data as a memmap
-        mm = np.memmap(fname, mode='r', dtype=self.dtype,
+        print fname, mmshape
+
+        if self.use_memmap:
+            # read the data as a memmap
+            mm = np.memmap(fname, mode='r', dtype=self.dtype,
                     order='C', shape=mmshape)
-                    
+        else:
+            # just read it all
+            # check cache
+            if self._cache_fname==fname:
+                print 'Using cache'
+                mm = self._cache_data
+            else:
+                print 'Setting cache: ' + fname
+                mm = np.fromfile(fname, dtype=self.dtype)
+                self._cache_fname = fname
+                self._cache_data = mm
+            mm.shape = mmshape
+
         # just bail if it is a vertical file
         if is_vertical:
             return mm
@@ -99,15 +125,20 @@ class LLCModel:
         
         # the start and stop location of the face on disk
         idx_lims = np.hstack([0,np.cumsum(self.facedims.prod(axis=1)/self.Ntop)])
-        mm = mm[:,idx_lims[N]:idx_lims[N+1]]
+        mmt = mm[:,idx_lims[N]:idx_lims[N+1]]
         dims = self.facedims[N]
         if self.reshapeface[N]:
             # needs to be reshaped
-            mm = mm.reshape((Nz,self.Ntop,self.Nside), order='C')
+            mmt = mmt.reshape((Nz,self.Ntop,self.Nside), order='C')
             # but not transposed
             #mm = mm.transpose((0,2,1))
             #mm = mm[:,::-1,:]
-        return mm
+        
+        # read into memory
+        data = mmt.view(np.ndarray).copy()
+        del mm
+        del mmt
+        return data
         
     def describe_faces(self):
         for n in range(self.Nfaces):
