@@ -6,7 +6,7 @@ class LLCModel:
 
     def __init__(self, Nfaces=None, Nside=None, Ntop=None, Nz=None,
         data_dir=None, grid_dir=None, default_dtype=np.dtype('>f4'),
-        L=20037508.342789244, use_memmap=True):
+        L=20037508.342789244, use_memmap=True, use_cache=False):
 
         self.Nfaces = Nfaces
         self.Nside = Nside
@@ -28,6 +28,7 @@ class LLCModel:
         self.grid_dir = grid_dir   
 
         # caching
+        self.use_cache = use_cache
         self._cache_fname = ''
         self._cache_data = None
         
@@ -106,14 +107,17 @@ class LLCModel:
         else:
             # just read it all
             # check cache
-            if self._cache_fname==fname:
-                print 'Using cache'
-                mm = self._cache_data
+            if self.use_cache:
+                if self._cache_fname==fname:
+                    print 'Using cache'
+                    mm = self._cache_data
+                else:
+                    print 'Setting cache: ' + fname
+                    mm = np.fromfile(fname, dtype=self.dtype)
+                    self._cache_fname = fname
+                    self._cache_data = mm
             else:
-                print 'Setting cache: ' + fname
                 mm = np.fromfile(fname, dtype=self.dtype)
-                self._cache_fname = fname
-                self._cache_data = mm
             mm.shape = mmshape
 
         # just bail if it is a vertical file

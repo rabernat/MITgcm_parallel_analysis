@@ -16,6 +16,13 @@ cd /pleiades/home3/rpaberna/Private/MITgcm_parallel_analysis/scripts
 echo "LLC: $LLC"
 echo "running output_tile_netcdf.py"
 
-python output_tile_netcdf.py
+# 701 - Gulf Stream
+# 263 - ACC
+# 415 - Subtropical Pac.
+
+tid=725
+niter=106128
+python output_grid_netcdf.py $tid $niter
+python output_tile_netcdf.py $tid $niter
 
 

@@ -5,12 +5,24 @@ import numpy as np
 from netCDF4 import Dataset
 sys.path.append('../')
 from llc import llc_model
+import sys
+
+# defaults
+tid = 144
+iter0 = 10368
+# get tile id and start iteration number from command line arguments
+if len(sys.argv)>1:
+    tid = int(sys.argv[1])
+if len(sys.argv)>2:
+    iter0 = int(sys.argv[2])
 
 deltaT = 25.
-iter0 = 10368
 diter = 144
 iterN = 487152
-iterstep = diter*24 # one day steps
+#iterstep = diter*24 # one day steps
+iterstep = diter
+
+# I get a memory error if I true to include the grid files
 do_grid = False
 
 output_dir = '/nobackup/rpaberna/LLC/tile_data'
@@ -21,7 +33,7 @@ LLC4320 = llc_model.LLCModel4320(
         grid_dir = os.path.join(base_dir_4320, 'grid'),
         use_memmap=False)
 
-tid = 144
+#tid = 144
 
 for tile in LLC4320.get_tile_factory():
     if tile.id==tid:
@@ -71,7 +83,7 @@ if do_grid:
     # areas
     rac = f.createVariable('rac', 'f', ('Ny','Nx'))
     rac[:] = tile.ra['C'].squeeze()
-    ras.units = 'area of c-point (m^2)'
+    rac.units = 'area of c-point (m^2)'
     ras = f.createVariable('ras', 'f', ('Ny','Nx'))
     ras[:] = tile.ra['S'].squeeze()
     ras.units = 'area of s-point (m^2)'
@@ -92,7 +104,7 @@ if do_grid:
     dyc = f.createVariable('dyc', 'f', ('Ny','Nx'))
     dyc[:] = tile.dy['C'].squeeze()
     dyc.units = 'm'
-    dyg = f.createVariable('yg', 'f', ('Ny','Nx'))
+    dyg = f.createVariable('dyg', 'f', ('Ny','Nx'))
     dyg[:] = tile.dy['G'].squeeze()
     dyg.units = 'm'
     drc = f.createVariable('drc', 'f', ('Nzf',))
