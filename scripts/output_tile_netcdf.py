@@ -40,7 +40,7 @@ for tile in LLC4320.get_tile_factory():
         break
 
 # set up netcdf output
-fname = '%s/LLC4320_%04d_%010d.nc' % (output_dir, tile.id, iter0) 
+fname = '%s/LLC4320_%04d_%010d.nc' % (output_dir, tile.id, iter0)
 #f = netcdf_file(fname, 'w')
 f = Dataset(fname, 'w')
 f.history = 'Generated for Xiao'
@@ -79,6 +79,9 @@ if do_grid:
     rf = f.createVariable('rf', 'f', ('Nzf',))
     rf[:] = tile.r['F'].squeeze()
     rf.units = 'depth at cell edges'
+    depth = f.createVariable('depth', 'f', ('Ny','Nx'))
+    depth[:] = tile.depth.squeeze()
+    depth.units = 'Ocean depth (m)'
 
     # areas
     rac = f.createVariable('rac', 'f', ('Ny','Nx'))
@@ -112,7 +115,7 @@ if do_grid:
     drc.units = 'm'
     drf = f.createVariable('drf', 'f', ('Nzc',))
     drf[:] = tile.dr['F'].squeeze()
-    drf.units = 'm' 
+    drf.units = 'm'
     # masks
     hfacc = f.createVariable('hfacc', 'f', ('Nzc','Ny','Nx'))
     hfacc[:] = tile.hfac['C']
@@ -123,7 +126,7 @@ if do_grid:
     hfacs = f.createVariable('hfacs', 'f', ('Nzc','Ny','Nx'))
     hfacs[:] = tile.hfac['S']
     hfacs.units = 'dimensionless (0 to 1)'
-    
+
     f.sync()
 
 # actual dATA
@@ -166,7 +169,3 @@ for nt, iter in enumerate(xrange(iter0, iterN, iterstep)):
     f.sync()
 
 f.close()
-
-
-
-
